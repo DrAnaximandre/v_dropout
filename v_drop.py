@@ -1,12 +1,20 @@
 from keras import backend as K
 from keras import constraints
 from keras.engine.topology import Layer
-
+from keras.layers import Activation, Dropout, Dense, Input
+from keras.models import Model
+from keras import metrics
+from keras import optimizers
 
 import tensorflow as tf
 from tensorflow.python.ops import gen_random_ops
 from tensorflow.python.framework import random_seed
 from tensorflow.python.ops import math_ops
+
+# some magic numbers
+c1 = 1.16145124
+c2 = -1.50204118
+c3 = 0.58629921
 
 
 def my_init(shape, dtype=None):
@@ -77,3 +85,44 @@ class VariationalDropoutLayer(Layer):
 
     def compute_output_shape(self, input_shape):
         return (input_shape[0], self.output_dim)
+
+
+def define_networks(input_shape,
+                    n_hidden=4, s_hidden=64,
+                    optimiser=optimizers.Adam(), magicrescale=1):
+
+    '''
+    '''
+
+    x = Input(batch_shape=(input_shape), name='x_input')
+    for i in range(n_hidden):
+        name_layer_v = 'h' + str(i)
+        name_layer_a = 'a' + str(i)
+        if i == 0:
+            vd = VariationalDropoutLayer(s_hidden, name=name_layer_v)(x)
+        else:
+            vd = VariationalDropoutLayer(s_hidden, name=name_layer_v)(net)
+        net = Activation('relu', name=name_layer_a)(vd)
+
+    output = Dense(10, name='o', activation='softmax')(net)
+
+    my_model = Model(x, output)
+
+    def customloss(y_true, y_pred):
+        xent_loss = metrics.categorical_crossentropy(y_true, y_pred)
+
+        klosslist = []
+        for l in my_model.layers:
+            if isinstance(l, VariationalDropoutLayer):
+                a = l.alpha
+                asq = a * a
+                acu = asq * a
+                klosslist.append(K.mean((.5 * K.log(a) + c1 *
+                                         a + c2 * asq + c3 * acu)))
+
+        return K.mean(xent_loss - magicrescale * K.sum(klosslist))
+
+    my_model.compile(optimizer=optimiser, loss=customloss,
+                     metrics=['categorical_accuracy'])
+
+    return(my_model)
