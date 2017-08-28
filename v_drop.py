@@ -87,32 +87,53 @@ class VariationalDropoutLayer(Layer):
         return (input_shape[0], self.output_dim)
 
 
-def define_networks(input_shape,
-                    n_hidden=4, s_hidden=64,
-                    optimiser=optimizers.Adam(), magicrescale=1):
-
-    '''
-    '''
-
+def definenetwork(input_shape, n_hidden, s_hidden,
+                  name, layer_type):
     x = Input(batch_shape=(input_shape), name='x_input')
+    net = None
     for i in range(n_hidden):
-        name_layer_v = 'h' + str(i)
-        name_layer_a = 'a' + str(i)
+        name_layer_v = name + '_h' + str(i)
+        name_layer_a = name + '_a' + str(i)
         if i == 0:
-            vd = VariationalDropoutLayer(s_hidden, name=name_layer_v)(x)
+            vd = layer_type(s_hidden, name=name_layer_v)(x)
         else:
-            vd = VariationalDropoutLayer(s_hidden, name=name_layer_v)(net)
+            vd = layer_type(s_hidden, name=name_layer_v)(net)
         net = Activation('relu', name=name_layer_a)(vd)
 
     output = Dense(10, name='o', activation='softmax')(net)
 
     my_model = Model(x, output)
 
+    return my_model
+
+
+def define_mlp_network(input_shape,
+                       n_hidden=4, s_hidden=64,
+                       optimiser=optimizers.Adam(),
+                       name='mlp'):
+
+    my_model_mlp = definenetwork(input_shape,
+                                 n_hidden, s_hidden, name, Dense)
+    my_model_mlp.compile(optimizer=optimiser,
+                         loss='categorical_crossentropy',
+                         metrics=['categorical_accuracy'])
+
+    return my_model_mlp
+
+
+def define_variational_network(input_shape, n_hidden=4, s_hidden=64,
+                               optimiser=optimizers.Adam(),
+                               magicrescale=1, name='v_drop'):
+
+    my_model_variational = definenetwork(input_shape,
+                                         n_hidden, s_hidden, name,
+                                         VariationalDropoutLayer)
+
     def customloss(y_true, y_pred):
         xent_loss = metrics.categorical_crossentropy(y_true, y_pred)
 
         klosslist = []
-        for l in my_model.layers:
+        for l in my_model_variational.layers:
             if isinstance(l, VariationalDropoutLayer):
                 a = l.alpha
                 asq = a * a
@@ -122,7 +143,8 @@ def define_networks(input_shape,
 
         return K.mean(xent_loss - magicrescale * K.sum(klosslist))
 
-    my_model.compile(optimizer=optimiser, loss=customloss,
-                     metrics=['categorical_accuracy'])
+    my_model_variational.compile(optimizer=optimiser, loss=customloss,
+                                 metrics=['categorical_accuracy'])
 
-    return(my_model)
+    return my_model_variational
+
